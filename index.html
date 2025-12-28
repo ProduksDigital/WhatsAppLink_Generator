@@ -1,58 +1,74 @@
 import React, { useState } from 'react';
 import { 
-  Instagram, 
-  Github, 
   Rocket, 
   Copy, 
   ExternalLink, 
   ArrowLeft, 
   Check, 
   AlertCircle,
-  User 
+  User,
+  Users,
+  CheckCircle2,
+  Info,
+  MessageCircle
 } from 'lucide-react';
 
 export default function WhatsAppFormatter() {
+  const [mode, setMode] = useState('single'); // 'single' or 'multi'
+  
+  // State Single Mode
   const [phone, setPhone] = useState('');
-  const [name, setName] = useState(''); // State untuk nama
+  const [name, setName] = useState('');
+  
+  // State Multi Mode
+  const [bulkInput, setBulkInput] = useState('');
+  const [bulkList, setBulkList] = useState([]);
+  
+  // Shared State
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  
-  const [generatedUrl, setGeneratedUrl] = useState(null);
+  const [generatedUrl, setGeneratedUrl] = useState(null); 
   const [isCopied, setIsCopied] = useState(false);
 
+  // --- FUNGSI UTAMA: FORMAT NOMOR HP ---
   const formatPhoneNumber = (input) => {
-    let cleanNumber = input.replace(/\D/g, '');
+    if (!input) return '';
+    
+    // 1. Hapus semua karakter yang bukan angka
+    let cleanNumber = input.toString().replace(/\D/g, ''); 
+
+    // 2. Logika prefix (awalan)
     if (cleanNumber.startsWith('0')) {
+      // Ubah 08xx menjadi 628xx
       cleanNumber = '62' + cleanNumber.slice(1);
     } else if (cleanNumber.startsWith('62')) {
-      // Sudah benar
+      // Sudah benar, biarkan
     } else if (cleanNumber.length > 0) {
+      // Asumsi user lupa nulis 0 atau 62 (misal: 8123456) -> jadi 628123456
       cleanNumber = '62' + cleanNumber;
     }
+    
     return cleanNumber;
   };
 
-  const handleGenerate = () => {
+  // --- LOGIKA SINGLE SEND ---
+  const handleGenerateSingle = () => {
     if (!phone) {
       setError('Nomor WhatsApp wajib diisi');
       return;
     }
-
     const formattedPhone = formatPhoneNumber(phone);
+    
+    // Validasi minimal digit (Indonesia biasanya 10-13 digit)
     if (formattedPhone.length < 10) {
-      setError('Nomor telepon terlihat tidak valid');
+      setError('Nomor telepon terlalu pendek/tidak valid');
       return;
     }
-
     setError('');
     
-    // --- LOGIKA PENGGABUNGAN NAMA + PESAN ---
+    // Logic Pesan + Nama
     let finalMessage = message;
-    
-    // Jika ada nama, tambahkan sapaan di depan pesan
     if (name.trim()) {
-      // Format: "Halo [Nama], [Pesan]"
-      // Jika pesan kosong, hanya "Halo [Nama]"
       finalMessage = message.trim() 
         ? `Halo ${name.trim()},\n\n${message}` 
         : `Halo ${name.trim()}`;
@@ -60,11 +76,87 @@ export default function WhatsAppFormatter() {
 
     const encodedMessage = encodeURIComponent(finalMessage);
     const url = `https://wa.me/${formattedPhone}?text=${encodedMessage}`;
-    
     setGeneratedUrl(url);
   };
 
+  // --- LOGIKA MULTI SEND ---
+  const handleGenerateMulti = () => {
+    if (!bulkInput.trim()) {
+      setError('Masukkan daftar nomor terlebih dahulu');
+      return;
+    }
+
+    // Split input berdasarkan baris baru (Enter)
+    const lines = bulkInput.split('\n'); 
+    
+    const processedList = lines.map((line, index) => {
+      // Skip baris kosong
+      if (!line.trim()) return null;
+
+      let rawPhone = line;
+      let rawName = '';
+
+      // Deteksi separator (Koma, Pipe, atau Tab)
+      if (line.includes(',')) {
+        const parts = line.split(',');
+        rawPhone = parts[0];
+        rawName = parts.slice(1).join(' '); // Gabung sisa jika nama mengandung spasi
+      } else if (line.includes('|')) {
+        const parts = line.split('|');
+        rawPhone = parts[0];
+        rawName = parts[1];
+      } else if (line.includes('\t')) {
+         // Support copy-paste dari Excel
+        const parts = line.split('\t');
+        rawPhone = parts[0];
+        rawName = parts[1];
+      }
+
+      const formatted = formatPhoneNumber(rawPhone);
+      const cleanName = rawName ? rawName.trim() : '';
+
+      // Validasi nomor hasil format
+      if (formatted.length >= 10) {
+        // Buat pesan personal per item
+        let personalMessage = message;
+        if (cleanName) {
+           personalMessage = message.trim() 
+            ? `Halo ${cleanName},\n\n${message}` 
+            : `Halo ${cleanName}`;
+        }
+
+        const encodedMessage = encodeURIComponent(personalMessage);
+        
+        return {
+          id: index,
+          original: line,
+          phone: formatted,
+          name: cleanName,
+          url: `https://wa.me/${formatted}?text=${encodedMessage}`,
+          sent: false
+        };
+      }
+      return null;
+    }).filter(item => item !== null); // Hapus yang null (gagal validasi)
+
+    if (processedList.length === 0) {
+      setError('Tidak ada data valid. Pastikan format: Nomor, Nama');
+      return;
+    }
+
+    setBulkList(processedList);
+    setError('');
+  };
+
+  const markAsSent = (id) => {
+    setBulkList(prev => prev.map(item => {
+      if (item.id === id) return { ...item, sent: true };
+      return item;
+    }));
+  };
+
   const handleCopy = () => {
+    // Fallback copy method yang aman untuk iframe/webview
     const textArea = document.createElement("textarea");
     textArea.value = generatedUrl;
     document.body.appendChild(textArea);
@@ -79,159 +171,232 @@ export default function WhatsAppFormatter() {
     document.body.removeChild(textArea);
   };
 
-  const handleOpenWA = () => {
-    if (generatedUrl) {
-      window.open(generatedUrl, '_blank');
-    }
-  };
-
   const handleReset = () => {
     setGeneratedUrl(null);
+    setBulkList([]);
     setIsCopied(false);
+    setError('');
   };
 
   return (
-    <div className="min-h-screen w-full bg-gradient-to-br from-indigo-900 via-purple-900 to-violet-800 flex items-center justify-center p-4 font-sans text-white relative overflow-hidden">
+    <div className="min-h-screen w-full bg-gradient-to-br from-slate-900 via-[#0B1120] to-gray-900 flex items-center justify-center p-4 font-sans text-white relative overflow-hidden">
       
-      {/* Background Decor Elements */}
-      <div className="absolute top-10 left-10 w-72 h-72 bg-purple-600 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob"></div>
-      <div className="absolute top-0 right-10 w-72 h-72 bg-indigo-600 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob animation-delay-2000"></div>
-      <div className="absolute -bottom-32 left-20 w-72 h-72 bg-pink-600 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob animation-delay-4000"></div>
+      {/* Background Decor */}
+      <div className="absolute top-10 left-10 w-72 h-72 bg-blue-900/40 rounded-full mix-blend-screen filter blur-3xl opacity-20 animate-blob"></div>
+      <div className="absolute top-0 right-10 w-72 h-72 bg-emerald-900/30 rounded-full mix-blend-screen filter blur-3xl opacity-20 animate-blob animation-delay-2000"></div>
 
       <div className="flex flex-col gap-6 w-full max-w-md relative z-10">
         
-        <div className="bg-white/10 backdrop-blur-xl border border-white/20 shadow-2xl rounded-3xl p-8 w-full transition-all duration-300">
+        {/* Main Card */}
+        <div className="bg-white/5 backdrop-blur-2xl border border-white/10 shadow-2xl rounded-3xl p-6 w-full transition-all duration-300">
           
-          <div className="text-center mb-8">
-            <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-purple-200 mb-2">
-              WhatsApp Link
+          <div className="text-center mb-6">
+            <h1 className="text-2xl font-bold text-white mb-1 tracking-tight flex items-center justify-center gap-2">
+              <MessageCircle className="text-emerald-500" size={28}/>
+              WhatsApp Sender
             </h1>
-            <p className="text-purple-200 text-sm font-light">
-              Kirim pesan instan tanpa simpan kontak
+            <p className="text-slate-400 text-xs font-light">
+              Kirim pesan langsung tanpa simpan kontak
             </p>
           </div>
 
-          {!generatedUrl ? (
-            /* --- FORM INPUT VIEW --- */
-            <div className="space-y-5 animate-fadeIn">
+          {/* TABS SWITCHER */}
+          {!generatedUrl && bulkList.length === 0 && (
+            <div className="flex bg-black/30 p-1 rounded-xl mb-6 border border-white/5">
+              <button 
+                onClick={() => { setMode('single'); setError(''); }}
+                className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-all ${mode === 'single' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
+              >
+                <User size={16} /> Single
+              </button>
+              <button 
+                onClick={() => { setMode('multi'); setError(''); }}
+                className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-all ${mode === 'multi' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
+              >
+                <Users size={16} /> Multi
+              </button>
+            </div>
+          )}
+
+          {/* === KONTEN INPUT === */}
+          {!generatedUrl && bulkList.length === 0 && (
+            <div className="space-y-4 animate-fadeIn">
               
-              {/* Input Nomor */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-purple-100 ml-1 block">
-                  Nomor WhatsApp
-                </label>
-                <input
-                  type="tel"
-                  placeholder="08xx / 62xx"
-                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-purple-300/50 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:bg-white/10 transition-all"
-                  value={phone}
-                  onChange={(e) => {
-                    setPhone(e.target.value);
-                    if(error) setError('');
-                  }}
-                />
-                {error && (
-                  <div className="flex items-center gap-2 text-red-300 text-xs ml-1 animate-pulse">
-                    <AlertCircle size={12} />
-                    <span>{error}</span>
+              {mode === 'single' ? (
+                /* --- FORM SINGLE --- */
+                <>
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-slate-300 ml-1">Nomor WhatsApp</label>
+                    <input
+                      type="tel"
+                      placeholder="0812xxxx / 628xxxx"
+                      className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                    />
                   </div>
-                )}
-              </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-slate-300 ml-1">Nama Tujuan (Opsional)</label>
+                    <input
+                      type="text"
+                      placeholder="Contoh: Pak Hadi"
+                      className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                    />
+                  </div>
+                </>
+              ) : (
+                /* --- FORM MULTI --- */
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center ml-1">
+                    <label className="text-xs font-medium text-slate-300">Daftar (Format: Nomor, Nama)</label>
+                    <div className="group relative">
+                        <Info size={14} className="text-slate-500 cursor-help hover:text-blue-400"/>
+                        <div className="absolute right-0 bottom-full mb-2 w-56 p-3 bg-slate-900 border border-slate-700 text-[11px] text-slate-300 rounded-lg hidden group-hover:block shadow-xl z-20">
+                            <p className="font-bold text-white mb-1">Cara Pakai:</p>
+                            <ul className="list-disc pl-3 space-y-1">
+                                <li>Format manual: <code>0812xx, Nama</code></li>
+                                <li>Copy dari Excel (2 kolom): Kolom A (Nomor), Kolom B (Nama).</li>
+                                <li>Satu data per baris.</li>
+                            </ul>
+                        </div>
+                    </div>
+                  </div>
+                  <textarea
+                    rows="6"
+                    placeholder={`0812345678, Pak Budi\n0812987654, Bu Siti\n0857112233`}
+                    className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 text-xs font-mono whitespace-pre"
+                    value={bulkInput}
+                    onChange={(e) => setBulkInput(e.target.value)}
+                  />
+                </div>
+              )}
 
-              {/* Input Nama (BARU) */}
+              {/* Shared Message Input */}
               <div className="space-y-2">
-                <label className="text-sm font-medium text-purple-100 ml-1 flex items-center gap-2">
-                  <User size={14} />
-                  Nama Tujuan <span className="text-purple-300/50 text-xs font-normal">(Opsional)</span>
-                </label>
-                <input
-                  type="text"
-                  placeholder="Contoh: Pak Hadi"
-                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-purple-300/50 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:bg-white/10 transition-all"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                />
-              </div>
-
-              {/* Input Pesan */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-purple-100 ml-1 block">
-                  Pesan
-                </label>
+                <label className="text-xs font-medium text-slate-300 ml-1">Isi Pesan</label>
                 <textarea
                   placeholder="Tulis pesan..."
                   rows="3"
-                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-purple-300/50 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:bg-white/10 transition-all resize-none"
+                  className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 resize-none transition-all"
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
                 />
-                {/* Preview Pesan Kecil */}
-                {(name || message) && (
-                  <div className="bg-black/20 rounded-lg p-2 mt-1">
-                    <p className="text-xs text-purple-200/60 font-mono">
-                      Preview: {name ? `Halo ${name}, ` : ''}{message}
-                    </p>
-                  </div>
-                )}
               </div>
+
+              {error && (
+                <div className="flex items-center gap-2 text-red-300 text-xs ml-1 bg-red-500/10 border border-red-500/20 p-2.5 rounded-lg animate-pulse">
+                  <AlertCircle size={14} />
+                  <span>{error}</span>
+                </div>
+              )}
 
               <button
-                onClick={handleGenerate}
-                className="w-full mt-2 bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 hover:to-green-500 text-white font-semibold py-3.5 px-6 rounded-xl shadow-lg shadow-emerald-900/20 transform transition-all active:scale-95 flex items-center justify-center gap-2 group"
+                onClick={mode === 'single' ? handleGenerateSingle : handleGenerateMulti}
+                className="w-full mt-2 bg-gradient-to-r from-emerald-600 to-green-700 hover:from-emerald-500 hover:to-green-600 text-white font-bold py-3.5 px-6 rounded-xl shadow-lg shadow-emerald-900/30 transform transition-all active:scale-[0.98] flex items-center justify-center gap-2 group"
               >
-                <Rocket className="w-5 h-5 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 transition-transform" />
-                <span>Generate Link</span>
+                {mode === 'single' ? <Rocket className="w-5 h-5 group-hover:-translate-y-0.5 transition-transform" /> : <Users className="w-5 h-5 group-hover:scale-110 transition-transform" />}
+                <span>{mode === 'single' ? 'Buat Link WhatsApp' : 'Proses Daftar Antrian'}</span>
               </button>
             </div>
-          ) : (
-            /* --- RESULT VIEW --- */
-            <div className="space-y-6 animate-fadeIn">
-              
-              <div className="bg-white/5 border border-white/10 rounded-2xl p-4 text-left">
-                <p className="text-xs font-bold text-purple-200/70 uppercase tracking-widest mb-2">
-                  Link Siap Pakai
-                </p>
-                <div className="break-all text-purple-50 font-mono text-sm leading-relaxed max-h-24 overflow-y-auto custom-scrollbar">
-                  {generatedUrl}
-                </div>
-              </div>
+          )}
 
+          {/* === HASIL SINGLE === */}
+          {generatedUrl && (
+            <div className="space-y-6 animate-fadeIn">
+              <div className="bg-black/20 border border-white/10 rounded-2xl p-4 text-left">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Preview Link</p>
+                <div className="break-all text-blue-200 font-mono text-xs max-h-24 overflow-y-auto custom-scrollbar p-1">{generatedUrl}</div>
+              </div>
+              
               <div className="space-y-3">
                 <button
                   onClick={handleCopy}
-                  className={`w-full font-semibold py-3.5 px-6 rounded-xl shadow-lg transform transition-all active:scale-95 flex items-center justify-center gap-2
-                    ${isCopied 
-                      ? 'bg-blue-600 text-white cursor-default' 
-                      : 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-900/30'
-                    }`}
+                  className={`w-full font-semibold py-3.5 px-6 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-[0.98] ${isCopied ? 'bg-blue-700 text-white shadow-none' : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20'}`}
                 >
                   {isCopied ? <Check className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
-                  <span>{isCopied ? 'Tersalin!' : 'Copy Link'}</span>
+                  <span>{isCopied ? 'Berhasil Disalin!' : 'Copy Link'}</span>
                 </button>
-
                 <button
-                  onClick={handleOpenWA}
-                  className="w-full bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 hover:to-green-500 text-white font-semibold py-3.5 px-6 rounded-xl shadow-lg shadow-emerald-900/20 transform transition-all active:scale-95 flex items-center justify-center gap-2"
+                  onClick={() => window.open(generatedUrl, '_blank')}
+                  className="w-full bg-gradient-to-r from-emerald-600 to-green-700 hover:from-emerald-500 hover:to-green-600 text-white font-semibold py-3.5 px-6 rounded-xl shadow-lg shadow-emerald-900/30 transform transition-all active:scale-[0.98] flex items-center justify-center gap-2"
                 >
                   <ExternalLink className="w-5 h-5" />
-                  <span>Kirim ke {name || 'WhatsApp'}</span>
+                  <span>Buka WhatsApp</span>
                 </button>
               </div>
-
-              <button 
-                onClick={handleReset}
-                className="w-full py-2 text-sm text-purple-200 hover:text-white flex items-center justify-center gap-2 transition-colors opacity-70 hover:opacity-100"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                <span>Buat Baru</span>
+              <button onClick={handleReset} className="w-full py-2 text-sm text-slate-400 hover:text-white flex items-center justify-center gap-2 transition-colors">
+                <ArrowLeft className="w-4 h-4" /> <span>Kembali</span>
               </button>
-
             </div>
           )}
+
+          {/* === HASIL MULTI === */}
+          {bulkList.length > 0 && (
+            <div className="space-y-4 animate-fadeIn">
+              <div className="flex justify-between items-center mb-1 px-1">
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                    <Users size={14} className="text-emerald-400"/> 
+                    Antrian ({bulkList.length})
+                </h3>
+                <span className="text-[10px] text-slate-400 bg-white/5 px-2 py-1 rounded-full">Klik "Kirim" satu per satu</span>
+              </div>
+              
+              <div className="max-h-[320px] overflow-y-auto custom-scrollbar space-y-2 pr-1 pb-2">
+                {bulkList.map((item) => (
+                  <div 
+                    key={item.id} 
+                    className={`flex items-center justify-between p-3 rounded-xl border transition-all ${item.sent ? 'bg-emerald-900/10 border-emerald-500/20 opacity-50' : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'}`}
+                  >
+                    <div className="flex flex-col gap-0.5 overflow-hidden">
+                       {item.name ? (
+                           <>
+                             <span className={`text-sm font-bold truncate ${item.sent ? 'text-emerald-200' : 'text-white'}`}>
+                                {item.name}
+                             </span>
+                             <span className="text-[10px] text-slate-400 font-mono">{item.phone}</span>
+                           </>
+                       ) : (
+                           <span className={`text-sm font-mono ${item.sent ? 'text-emerald-200' : 'text-slate-200'}`}>
+                              {item.phone}
+                           </span>
+                       )}
+                    </div>
+                    
+                    <button
+                      onClick={() => {
+                        window.open(item.url, '_blank');
+                        markAsSent(item.id);
+                      }}
+                      className={`ml-3 px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1 min-w-[80px] justify-center ${item.sent ? 'bg-transparent text-emerald-500 border border-emerald-500/30 cursor-default' : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/20 active:scale-95'}`}
+                    >
+                      {item.sent ? (
+                          <>
+                            <CheckCircle2 size={12} />
+                            <span>Done</span>
+                          </>
+                      ) : (
+                          <>
+                            <span>Kirim</span>
+                            <ExternalLink size={10} />
+                          </>
+                      )}
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <button onClick={handleReset} className="w-full py-3 mt-2 text-sm text-slate-400 bg-white/5 hover:bg-white/10 hover:text-white rounded-xl flex items-center justify-center gap-2 transition-all border border-transparent hover:border-white/10">
+                <ArrowLeft className="w-4 h-4" /> <span>Buat Daftar Baru</span>
+              </button>
+            </div>
+          )}
+
         </div>
         
         <div className="text-center">
-           <p className="text-xs text-purple-300/40">© 2024 WhatsApp Formatter Tool</p>
+           <p className="text-[10px] text-slate-600 font-medium tracking-wide">Copyright : @masbrohadi 2025</p>
         </div>
       </div>
     </div>
